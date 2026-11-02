@@ -4,6 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
+import * as path from "node:path";
 import * as agent from "../dist/agent.js";
 
 const ROOT = "/tmp/local-vibes-test-root";
@@ -16,9 +17,10 @@ test("path confinement blocks escapes", () => {
 });
 
 test("path confinement allows in-sandbox paths", () => {
-  assert.equal(agent.resolveInSandbox(ROOT, "calc.ts"), ROOT + "/calc.ts");
-  assert.equal(agent.resolveInSandbox(ROOT, "a/b/c.ts"), ROOT + "/a/b/c.ts");
-  assert.equal(agent.resolveInSandbox(ROOT, "."), ROOT);
+  const abs = path.resolve(ROOT); // C:\tmp\... on Windows
+  assert.equal(agent.resolveInSandbox(ROOT, "calc.ts"), path.join(abs, "calc.ts"));
+  assert.equal(agent.resolveInSandbox(ROOT, "a/b/c.ts"), path.join(abs, "a", "b", "c.ts"));
+  assert.equal(agent.resolveInSandbox(ROOT, "."), abs);
 });
 
 test("read_only schema excludes mutators", () => {
@@ -30,6 +32,23 @@ test("read_only schema excludes mutators", () => {
 test("read-write schema includes mutators", () => {
   const rw = new Set(agent.toolSchemas(false).map((t) => t.function.name));
   assert.ok(rw.has("write_file") && rw.has("edit_file"), "mutators missing in read-write");
+});
+
+test("write_file only creates new files; edit_file inserts text literally", () => {
+  const f = "write-once.txt";
+  fs.rmSync(path.join(ROOT, f), { force: true });
+  assert.match(agent.writeFile(ROOT, f, "a\n"), /^wrote/);
+  assert.match(agent.writeFile(ROOT, f, "b\n"), /already exists; use edit_file/);
+  assert.equal(fs.readFileSync(path.join(ROOT, f), "utf8"), "a\n");
+  agent.editFile(ROOT, f, "a", "$& $1");
+  assert.equal(fs.readFileSync(path.join(ROOT, f), "utf8"), "$& $1\n");
+});
+
+test("edit_file matches multi-line LF old_string against a CRLF file", () => {
+  const f = "crlf.txt";
+  fs.writeFileSync(path.join(ROOT, f), "one\r\ntwo\r\nthree\r\n");
+  assert.equal(agent.editFile(ROOT, f, "one\ntwo", "uno\ndos"), `edited ${f}`);
+  assert.equal(fs.readFileSync(path.join(ROOT, f), "utf8"), "uno\r\ndos\r\nthree\r\n");
 });
 
 test("cap truncates oversized output", () => {

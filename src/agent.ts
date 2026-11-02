@@ -122,20 +122,30 @@ function readFile(root: string, p: string): string {
   return cap(fs.readFileSync(resolveInSandbox(root, p), "utf8"));
 }
 
-function writeFile(root: string, p: string, content: string): string {
+export function writeFile(root: string, p: string, content: string): string {
   const full = resolveInSandbox(root, p);
+  // Local models tend to retype whole files from memory and silently drop or
+  // rewrite code; force targeted edit_file calls on anything that exists.
+  if (fs.existsSync(full)) return `ERROR: ${p} already exists; use edit_file to change it`;
   fs.mkdirSync(path.dirname(full), { recursive: true });
   fs.writeFileSync(full, content);
   return `wrote ${content.length} chars to ${p}`;
 }
 
-function editFile(root: string, p: string, oldStr: string, newStr: string): string {
+export function editFile(root: string, p: string, oldStr: string, newStr: string): string {
   const full = resolveInSandbox(root, p);
   const text = fs.readFileSync(full, "utf8");
+  // Models write "\n"; files checked out on Windows (core.autocrlf) use "\r\n",
+  // so multi-line old_strings would never match. Follow the file's line endings.
+  if (text.includes("\r\n")) {
+    const crlf = (s: string) => s.replace(/\r?\n/g, "\r\n");
+    oldStr = crlf(oldStr);
+    newStr = crlf(newStr);
+  }
   const count = text.split(oldStr).length - 1;
   if (count === 0) return `ERROR: old_string not found in ${p}`;
   if (count > 1) return `ERROR: old_string occurs ${count}× in ${p}; make it unique`;
-  fs.writeFileSync(full, text.replace(oldStr, newStr));
+  fs.writeFileSync(full, text.replace(oldStr, () => newStr)); // no $& / $1 expansion
   return `edited ${p}`;
 }
 
@@ -238,7 +248,7 @@ export function toolSchemas(readOnly: boolean): ChatTool[] {
   ];
   if (!readOnly) {
     tools.push(
-      fn("write_file", "Create or overwrite a file with `content`.", { path: { type: "string" }, content: { type: "string" } }, ["path", "content"]),
+      fn("write_file", "Create a NEW file with `content` (fails if it exists; use edit_file for existing files).", { path: { type: "string" }, content: { type: "string" } }, ["path", "content"]),
       fn("edit_file", "Replace the unique occurrence of `old_string` with `new_string` in a file.", { path: { type: "string" }, old_string: { type: "string" }, new_string: { type: "string" } }, ["path", "old_string", "new_string"]),
     );
     if (config.allowBash) {
