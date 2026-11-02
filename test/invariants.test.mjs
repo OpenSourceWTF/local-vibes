@@ -4,6 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
+import * as path from "node:path";
 import * as agent from "../dist/agent.js";
 
 const ROOT = "/tmp/local-vibes-test-root";
@@ -16,9 +17,10 @@ test("path confinement blocks escapes", () => {
 });
 
 test("path confinement allows in-sandbox paths", () => {
-  assert.equal(agent.resolveInSandbox(ROOT, "calc.ts"), ROOT + "/calc.ts");
-  assert.equal(agent.resolveInSandbox(ROOT, "a/b/c.ts"), ROOT + "/a/b/c.ts");
-  assert.equal(agent.resolveInSandbox(ROOT, "."), ROOT);
+  const abs = path.resolve(ROOT); // C:\tmp\... on Windows
+  assert.equal(agent.resolveInSandbox(ROOT, "calc.ts"), path.join(abs, "calc.ts"));
+  assert.equal(agent.resolveInSandbox(ROOT, "a/b/c.ts"), path.join(abs, "a", "b", "c.ts"));
+  assert.equal(agent.resolveInSandbox(ROOT, "."), abs);
 });
 
 test("read_only schema excludes mutators", () => {
